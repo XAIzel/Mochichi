@@ -1,307 +1,241 @@
 import reflex as rx
-from ..state import BaseState
-from ..components.sidebar import sidebar
+from mochichi_scheduler.state import BaseState
 
-def quick_action_card(icon_name: str, label: str) -> rx.Component:
-    return rx.hstack(
-        rx.icon(icon_name, size=16, color="#a33"),
-        rx.text(label, font_size="13px", font_weight="500", color="#222"),
-        spacing="3",
-        align="center",
-        padding="12px",
-        background_color="#fff5f5",
-        border_radius="8px",
-        width="100%",
-        cursor="pointer",
-        _hover={"background_color": "#ffebeb"},
-    )
+# ==========================================
+# 1. STATE
+# ==========================================
+class FacultyState(rx.State):
+    current_tab: str = "Overview"
 
-def status_badge(status: rx.Var[str]) -> rx.Component:
-    return rx.badge(
-        status,
-        color_scheme=rx.cond(
-            status == "Confirmed",
-            "green",
-            rx.cond(
-                status == "Requested",
-                "yellow",
-                rx.cond(status == "Pending", "orange", "gray"),
+    def set_tab(self, tab_name: str):
+        self.current_tab = tab_name
+
+# ==========================================
+# 2. HEADER & DROPDOWN
+# ==========================================
+def live_availability_dropdown() -> rx.Component:
+    def menu_item(color, text):
+        return rx.menu.item(
+            rx.hstack(
+                rx.icon("circle", color=color, fill=color, size=14), 
+                rx.text(text, weight="bold", color="#374151"), 
+                align="center", spacing="3"
+            ),
+            padding="2", cursor="pointer"
+        )
+    
+    return rx.menu.root(
+        rx.menu.trigger(
+            rx.button(
+                rx.icon("circle", color="#16A34A", size=14, fill="#16A34A"),
+                "Available",
+                variant="surface", color="#111827", background_color="#FDFBF7",
+                border="1px solid #E5E7EB", radius="full", cursor="pointer", padding="2 4"
             ),
         ),
-        variant="soft",
+        rx.menu.content(
+            menu_item("#16A34A", "Available"),
+            menu_item("#EAB308", "In Class"),
+            menu_item("#EF4444", "Do not Disturb"),
+            menu_item("#8B5CF6", "Out of office"),
+            menu_item("#F97316", "Busy"),
+            style={"background_color": "#FDFBF7", "border_radius": "12px"}
+        ),
     )
 
-def faculty_card(faculty: dict) -> rx.Component:
+def top_header() -> rx.Component:
+    return rx.hstack(
+        rx.hstack(
+            rx.box(
+                rx.text("M", color="white", font_weight="bold", font_size="13px"),
+                background_color="#BE123C", width="24px", height="24px", border_radius="6px",
+                display="flex", align_items="center", justify_content="center",
+            ),
+            rx.text("Mochichi Scheduler", font_weight="600", font_size="14px", color="#1F2937"),
+            spacing="2", align="center",
+        ),
+        rx.spacer(),
+        live_availability_dropdown(),
+        width="100%", padding_x="24px", padding_y="14px", 
+        background_color="white", border_bottom="1px solid #EDE8DE",
+    )
+
+# ==========================================
+# 3. REUSABLE UI COMPONENTS 
+# ==========================================
+def _context_tile(count: str, label: str, bg_color: str) -> rx.Component:
+    """Single status metric tile matching student UI."""
     return rx.box(
         rx.vstack(
-            rx.hstack(
-                rx.avatar(fallback="PK", size="2"),
-                rx.vstack(
-                    rx.text(faculty["name"], font_weight="bold", font_size="13px", color="#111"),
-                    rx.text(faculty["dept"], color="#444", font_size="11px"),
-                    spacing="0",
-                    align_items="start",
-                ),
-                spacing="3",
-                align="center",
-            ),
-            rx.vstack(
-                rx.text("Visit Reason Summary", color="#444", font_size="10px", font_weight="600"),
-                rx.text(faculty["summary"], font_size="12px", font_weight="600", color="#222"),
-                spacing="1",
-                align_items="start",
-            ),
-            rx.hstack(
-                rx.box(
-                    width="8px",
-                    height="8px",
-                    border_radius="50%",
-                    background_color=faculty["color"],
-                ),
-                rx.text(faculty["status"], font_size="11px", color="#333", font_weight="500"),
-                spacing="2",
-                align="center",
-            ),
-            spacing="3",
-            align_items="start",
+            rx.text(count, font_weight="700", font_size="28px", color="#111827"),
+            rx.text(label, font_size="12px", color="#374151", font_weight="500"),
+            spacing="2", align_items="start",
         ),
-        background_color="white",
-        border="1px solid #e6dec9",
-        border_radius="10px",
-        padding="14px",
-        width="210px",
-        height="220px",
+        padding="18px", background_color=bg_color, border_radius="12px", width="100%",
+    )
+
+def status_badge(status: str) -> rx.Component:
+    if status == "Requested":
+        return rx.badge("Requested", color="#CA8A04", bg="#FEF08A", radius="medium", size="2", padding="1 3")
+    elif status == "Cancelled":
+        return rx.badge("Cancelled", color="#DC2626", bg="#FECACA", radius="medium", size="2", padding="1 3")
+    return rx.badge("Confirmed", color="#16A34A", bg="#BBF7D0", radius="medium", size="2", padding="1 3")
+
+def action_icons(status: str) -> rx.Component:
+    red_btn = rx.box(rx.icon("x", size=14, color="#DC2626", stroke_width=3), bg="#FEE2E2", padding="2px 10px", border_radius="8px", cursor="pointer")
+    green_btn = rx.box(rx.icon("check", size=14, color="#16A34A", stroke_width=3), bg="#DCFCE7", padding="2px 10px", border_radius="8px", cursor="pointer")
+    
+    if status == "Requested":
+        return rx.hstack(red_btn, green_btn, spacing="2")
+    elif status == "Cancelled":
+        return red_btn
+    else:
+        return green_btn
+
+def table_header() -> rx.Component:
+    return rx.hstack(
+        rx.box(rx.text("Students", weight="bold", size="2", color="#111827"), width="150px", flex_shrink="0"), 
+        rx.box(rx.text("Section", weight="bold", size="2", color="#111827"), width="90px", flex_shrink="0"),
+        rx.box(rx.text("Dates/Time", weight="bold", size="2", color="#111827"), width="150px", flex_shrink="0"), 
+        rx.box(rx.text("Approval", weight="bold", size="2", color="#111827"), width="170px", flex_shrink="0"),
+        rx.box(rx.text("Location", weight="bold", size="2", color="#111827"), width="90px", flex_shrink="0"), 
+        rx.box(rx.text("Visit reason", weight="bold", size="2", color="#111827"), flex="1", min_width="120px"),
+        padding_bottom="1", width="100%", align="center"
+    )
+
+def table_row(student, section, datetime, status, location, reason) -> rx.Component:
+    return rx.hstack(
+        rx.box(rx.text(student, size="2", color="#374151"), width="150px", flex_shrink="0"),
+        rx.box(rx.text(section, size="2", color="#374151"), width="90px", flex_shrink="0"),
+        rx.box(rx.text(datetime, size="1", color="#374151"), width="150px", flex_shrink="0"),
+        rx.box(rx.hstack(status_badge(status), action_icons(status), spacing="2"), width="170px", flex_shrink="0"),
+        rx.box(rx.text(location, size="2", color="#374151"), width="90px", flex_shrink="0"),
+        rx.box(rx.text(reason, size="2", color="#374151"), flex="1", min_width="120px"),
+        align="center", padding_y="3", width="100%"
+    )
+
+# ==========================================
+# 4. TAB VIEWS 
+# ==========================================
+def overview_view() -> rx.Component:
+    """Tab 1: Overview - Using the Student Dashboard Layout Structure"""
+    return rx.hstack(
+        # Left Card: Upcoming Work Context
+        rx.box(
+            rx.vstack(
+                rx.heading("Upcoming Work Context", size="4", font_weight="700", color="#111827", margin_bottom="8px"),
+                rx.grid(
+                    _context_tile("5", "Confirmed Appointments", "#FDE8E8"), # Pinkish
+                    _context_tile("3", "Blocked Time Slots", "#FEF9C3"), # Yellowish
+                    _context_tile("2", "Open Available Slots", "#E0F2FE"), # Blueish
+                    _context_tile("1", "Completed Session", "#DCFCE7"), # Greenish
+                    columns="2", spacing="4", width="100%"
+                ),
+                spacing="3", align_items="start", width="100%"
+            ),
+            background_color="white", border="1px solid #E6DEC8", border_radius="14px", 
+            padding="28px", width="380px", min_height="440px"
+        ),
+        
+        # Right Card: Approval Table
+        rx.box(
+            rx.vstack(
+                table_header(),
+                rx.text("Approval Quick View", size="1", color="#6B7280", margin_bottom="2"),
+                rx.vstack(
+                    table_row("Stud. James Reid", "BSIT - 1A", "Oct 7 - 7:40 am", "Requested", "Eng 412", "Draft review"),
+                    table_row("Stud. James Reid", "BSIT - 2C", "Oct 7 - 12:00 pm", "Requested", "Zoom", "Schedule discussion"),
+                    table_row("Stud. James Reid", "BSCS - 2A", "Oct 8 - 12:00 pm", "Requested", "Lab 2B", "Schedule discussion"),
+                    table_row("Stud. James Reid", "BSCS - 2B", "Oct 8 - 9:00 am", "Cancelled", "Lab 2B", "Schedule discussion"),
+                    table_row("Stud. James Reid", "BSIS - 1C", "Oct 8 - 12:00 pm", "Confirmed", "Lab 2B", "Schedule discussion"),
+                    table_row("Stud. James Reid", "BSIS - 2B", "Oct 8 - 12:00 pm", "Confirmed", "Lab 2B", "Schedule discussion"),
+                    table_row("Stud. James Reid", "BSIS - 4A", "Oct 9 - 9:00 am", "Confirmed", "Lab 2B", "Schedule discussion"),
+                    spacing="0", width="100%"
+                ),
+                width="100%"
+            ),
+            background_color="white", border="1px solid #E6DEC8", border_radius="14px", 
+            padding="28px", width="850px", min_height="440px"
+        ),
+        spacing="6", 
+        align="stretch", # Forces both boxes to scale to equal heights
+        justify="center",
+        wrap="wrap"
+    )
+
+# ==========================================
+# 5. MAIN LAYOUT 
+# ==========================================
+def sidebar_item(text: str, icon_tag: str) -> rx.Component:
+    is_active = FacultyState.current_tab == text
+    return rx.hstack(
+        rx.icon(icon_tag, size=18, color=rx.cond(is_active, "#927345", "#6B7280")),
+        rx.text(text, weight=rx.cond(is_active, "bold", "regular"), size="2", color=rx.cond(is_active, "#111827", "#4B5563")),
+        background_color=rx.cond(is_active, "#F3E8D6", "transparent"),
+        padding="3", border_radius="8px", width="100%", align="center", cursor="pointer",
+        on_click=FacultyState.set_tab(text)
+    )
+
+def sidebar() -> rx.Component:
+    return rx.vstack(
+        rx.hstack(
+            rx.avatar(fallback="Prof", color_scheme="blue", size="3", radius="full"),
+            rx.vstack(
+                rx.text("Prof. Elena Cruz", weight="bold", size="2", color="#111827"),
+                rx.text("elena.cruz@university.edu", size="1", color="#6B7280"),
+                spacing="0"
+            ),
+            padding="3", border="1px solid #E5E7EB", border_radius="12px", margin_bottom="4", bg="white", width="100%"
+        ),
+        sidebar_item("Overview", "layout-grid"),
+        sidebar_item("View all Confirmed Appointments", "calendar-check"),
+        sidebar_item("Approval", "file-check-2"),
+        sidebar_item("Actions", "sliders-horizontal"),
+        
+        rx.spacer(),
+        rx.hstack(rx.icon("log-out", size=18, color="#111827"), rx.text("Sign out", weight="bold", size="2", color="#111827"), padding="3", width="100%", align="center", cursor="pointer"),
+        height="100vh", width="260px", padding="4", bg="#FCFBFA", border_right="1px solid #E5E7EB", flex_shrink="0"
     )
 
 def dashboard_view() -> rx.Component:
     return rx.hstack(
+        # 1. Left Sidebar
         sidebar(),
+        
+        # 2. Main Layout Area (Exactly mirroring the student structure)
         rx.vstack(
-            # Top Header
-            rx.hstack(
-                rx.hstack(
-                    rx.box(
-                        rx.text("M", color="white", font_weight="bold", font_size="12px"),
-                        background_color="#a33",
-                        padding="4px 8px",
-                        border_radius="4px",
-                    ),
-                    rx.text("Mochichi Scheduler", font_weight="600", font_size="14px", color="#111"),
-                    rx.badge("Dashboard", variant="soft", color_scheme="gray"),
-                    spacing="3",
-                    align="center",
-                ),
-                rx.hstack(
-                    rx.icon("bell", size=18, color="#444"),
-                    rx.box(
-                        rx.text(
-                            BaseState.user_initials,
-                            color="white",
-                            font_weight="bold",
-                            font_size="10px",
-                        ),
-                        background_color="#2c2c2c",
-                        width="36px",
-                        height="26px",
-                        border_radius="6px",
-                        display="flex",
-                        align_items="center",
-                        justify_content="center",
-                        padding_x="6px",
-                    ),
-                    spacing="3",
-                    align="center",
+            top_header(),
+            
+            # The Content Box below the header centered beautifully
+            rx.center(
+                rx.match(
+                    FacultyState.current_tab,
+                    ("Overview", overview_view()),
+                    overview_view() 
                 ),
                 width="100%",
-                padding="12px 24px",
-                background_color="white",
-                border_bottom="1px solid #e6dec9",
-                justify_content="space-between",
+                flex="1",
+                padding="40px", 
             ),
-            # Main Scrollable Body
-            rx.vstack(
-                # Section 1: Dashboard Cards Row
-                rx.hstack(
-                    # Weekly Schedule Card
-                    rx.box(
-                        rx.vstack(
-                            rx.text("Weekly Schedule & Slots", font_weight="bold", font_size="14px", color="#222"),
-                            rx.text("Current Week Open Advising", font_size="12px", color="#555", font_weight="500"),
-                            rx.vstack(
-                                rx.foreach(
-                                    BaseState.weekly_slots,
-                                    lambda slot: rx.hstack(
-                                        rx.vstack(
-                                            rx.text(slot["day"], font_weight="bold", font_size="12px", color="#222"),
-                                            rx.text(slot["time"], font_size="11px", color="#444"),
-                                            spacing="0",
-                                            align_items="start",
-                                        ),
-                                        rx.badge(
-                                            slot["status"],
-                                            color_scheme=rx.cond(slot["status"] == "Open", "green", "gray"),
-                                            size="1",
-                                        ),
-                                        width="100%",
-                                        justify_content="space-between",
-                                        align="center",
-                                        padding="8px 12px",
-                                        border_radius="6px",
-                                        background_color="#f9f9f9",
-                                    ),
-                                ),
-                                spacing="2",
-                                width="100%",
-                            ),
-                            spacing="3",
-                            align_items="start",
-                        ),
-                        background_color="white",
-                        border="1px solid #e6dec9",
-                        border_radius="12px",
-                        padding="16px",
-                        flex="1",
-                    ),
-                    # Student Specific Context Card
-                    rx.box(
-                        rx.vstack(
-                            rx.text("Student-Specific Context", font_weight="bold", font_size="14px", color="#222"),
-                            rx.grid(
-                                rx.box(
-                                    rx.vstack(
-                                        rx.hstack(rx.icon("calendar", size=16, color="#333"), rx.text("5", font_weight="bold", font_size="18px", color="#111")),
-                                        rx.text("Confirmed", font_size="11px", color="#333", font_weight="500"),
-                                    ),
-                                    padding="12px",
-                                    background_color="#ffebee",
-                                    border_radius="8px",
-                                ),
-                                rx.box(
-                                    rx.vstack(
-                                        rx.hstack(rx.icon("clock", size=16, color="#333"), rx.text("3", font_weight="bold", font_size="18px", color="#111")),
-                                        rx.text("Requested", font_size="11px", color="#333", font_weight="500"),
-                                    ),
-                                    padding="12px",
-                                    background_color="#fffde7",
-                                    border_radius="8px",
-                                ),
-                                rx.box(
-                                    rx.vstack(
-                                        rx.hstack(rx.icon("help-circle", size=16, color="#333"), rx.text("1", font_weight="bold", font_size="18px", color="#111")),
-                                        rx.text("Pending", font_size="11px", color="#333", font_weight="500"),
-                                    ),
-                                    padding="12px",
-                                    background_color="#e1f5fe",
-                                    border_radius="8px",
-                                ),
-                                rx.box(
-                                    rx.vstack(
-                                        rx.hstack(rx.icon("help-circle", size=16, color="#333"), rx.text("1", font_weight="bold", font_size="18px", color="#111")),
-                                        rx.text("Cancelled", font_size="11px", color="#333", font_weight="500"),
-                                    ),
-                                    padding="12px",
-                                    background_color="#ffebee",
-                                    border_radius="8px",
-                                ),
-                                columns="2",
-                                spacing="3",
-                                width="100%",
-                            ),
-                            spacing="3",
-                            align_items="start",
-                        ),
-                        background_color="white",
-                        border="1px solid #e6dec9",
-                        border_radius="12px",
-                        padding="16px",
-                        flex="1",
-                    ),
-                    # Upcoming Appointments Table Card
-                    rx.box(
-                        rx.vstack(
-                            rx.text("Your upcoming appointments", font_weight="bold", font_size="14px", color="#222"),
-                            rx.text("8 THIS FORTNIGHT", font_size="10px", color="#444", font_weight="bold"),
-                            rx.vstack(
-                                rx.foreach(
-                                    BaseState.upcoming_appointments,
-                                    lambda appt: rx.hstack(
-                                        rx.text(appt["prof"], font_size="11px", font_weight="500", color="#222", width="90px"),
-                                        rx.text(appt["date"], font_size="11px", color="#444", width="100px"),
-                                        status_badge(appt["status"]),
-                                        rx.text(appt["location"], font_size="11px", color="#444", width="70px"),
-                                        rx.text(appt["reason"], font_size="11px", color="#333", width="100px"),
-                                        width="100%",
-                                        justify_content="space-between",
-                                        align="center",
-                                        padding_y="4px",
-                                        border_bottom="1px solid #f0f0f0",
-                                    ),
-                                ),
-                                spacing="1",
-                                width="100%",
-                            ),
-                            spacing="3",
-                            align_items="start",
-                        ),
-                        background_color="white",
-                        border="1px solid #e6dec9",
-                        border_radius="12px",
-                        padding="16px",
-                        flex="2",
-                    ),
-                    # Quick Actions Card
-                    rx.box(
-                        rx.vstack(
-                            rx.text("Quick Actions & Updates", font_weight="bold", font_size="14px", color="#222"),
-                            quick_action_card("calendar-plus", "Start a new request"),
-                            quick_action_card("calendar-clock", "Request rescheduling"),
-                            quick_action_card("help-circle", "Cancel booking request"),
-                            spacing="3",
-                            width="100%",
-                            align_items="start",
-                        ),
-                        background_color="white",
-                        border="1px solid #e6dec9",
-                        border_radius="12px",
-                        padding="16px",
-                        flex="1",
-                    ),
-                    width="100%",
-                    spacing="4",
-                    align_items="stretch",
-                ),
-                # Section 2: Professor Status Quick View Grid
-                rx.box(
-                    rx.vstack(
-                        rx.text("Professor Status Quick View", font_weight="bold", font_size="14px", color="#222"),
-                        rx.hstack(
-                            rx.foreach(
-                                BaseState.faculty_list,
-                                lambda faculty: faculty_card(faculty),
-                            ),
-                            spacing="3",
-                            width="100%",
-                            overflow_x="auto",
-                        ),
-                        spacing="3",
-                        align_items="start",
-                    ),
-                    background_color="white",
-                    border="1px solid #e6dec9",
-                    border_radius="12px",
-                    padding="16px",
-                    width="100%",
-                ),
-                width="100%",
-                padding="24px",
-                spacing="5",
-            ),
+            
             flex="1",
             height="100vh",
             overflow_y="auto",
             background_color="#FAF6EE",
+            spacing="0",
         ),
+        
         width="100%",
         height="100vh",
         spacing="0",
+    )
+
+@rx.page(
+    route="/dashboard", 
+    title="Faculty Dashboard | Mochichi"
+)
+def dashboard_page() -> rx.Component:
+    return rx.box(
+        rx.html("<style>body { margin: 0; padding: 0; background-color: #FAF6EE; }</style>"),
+        dashboard_view(),
     )
