@@ -13,9 +13,10 @@ class State(BaseState):
     full_name: str = ""
     role: str = "student"  # 'student' | 'faculty' | 'admin'
     auth_error: str = ""
+    auth_success: str = ""
     is_logged_in: bool = False
     current_user_id: str = ""
-    is_signup_mode: bool = True
+    is_signup_mode: bool = False
 
     def set_email(self, email: str):
         self.email = email
@@ -35,14 +36,16 @@ class State(BaseState):
     def toggle_mode(self):
         self.is_signup_mode = not self.is_signup_mode
         self.auth_error = ""
+        self.auth_success = ""
 
-    def submit_action(self):
+    async def submit_action(self):
         """Routes the button click to signup or login."""
         if self.is_signup_mode:
-            return self.handle_signup()
-        return self.handle_login()
+            return await self.handle_signup()
+        return await self.handle_login()
 
-    def handle_login(self):
+    async def handle_login(self):
+        self.auth_success = ""
         if not self.email.endswith("@lspu.edu.ph"):
             self.auth_error = "Please use a valid LSPU institutional email (@lspu.edu.ph)."
             return
@@ -51,30 +54,60 @@ class State(BaseState):
             return
 
         try:
+            # 1. Authenticate with Supabase Auth
             response = supabase.auth.sign_in_with_password(
                 {
                     "email": self.email,
                     "password": self.password,
                 }
             )
+
             if response.user:
+                base = await self.get_state(BaseState)
+
                 self.is_logged_in = True
                 self.current_user_id = response.user.id
                 self.user_id = response.user.id
                 self.user_email = self.email
+                base.user_id = response.user.id
+                base.user_email = self.email
 
-                # Sync metadata into BaseState until Phase 2 'users' table query is wired
-                meta = response.user.user_metadata or {}
-                if meta.get("full_name"):
-                    self.user_name = meta["full_name"]
-                if meta.get("role") in ("student", "faculty", "admin"):
-                    self.user_role = meta["role"]
+                # 2. Fetch identity from Supabase 'users' table
+                user_record = (
+                    supabase.table("users")
+                    .select("role, full_name")
+                    .eq("user_id", response.user.id)
+                    .execute()
+                )
 
+                if user_record.data:
+                    resolved_role = user_record.data[0].get("role", "student")
+                    resolved_name = user_record.data[0].get("full_name", self.email)
+                else:
+                    # Fallback to metadata if the database table row isn't created yet
+                    meta = response.user.user_metadata or {}
+                    resolved_role = meta.get("role", "student")
+                    resolved_name = meta.get("full_name", "Unknown User")
+
+                self.user_role = resolved_role
+                self.user_name = resolved_name
+                base.user_role = resolved_role
+                base.user_name = resolved_name
                 self.auth_error = ""
+
+                # 3. Role-Based Routing
+                if resolved_role == "admin":
+                    return rx.redirect("/admin-dashboard")
+                elif resolved_role == "faculty":
+                    return rx.redirect("/faculty-dashboard")
+                else:
+                    return rx.redirect("/dashboard")
+
         except Exception as e:
             self.auth_error = f"Login failed: {str(e)}"
 
-    def handle_signup(self):
+    async def handle_signup(self):
+        self.auth_success = ""
         if not self.email.endswith("@lspu.edu.ph"):
             self.auth_error = "Registration requires an LSPU institutional email (@lspu.edu.ph)."
             return
@@ -101,23 +134,42 @@ class State(BaseState):
                     },
                 }
             )
+            base = await self.get_state(BaseState)
+
             self.user_name = self.full_name
             self.user_email = self.email
             self.user_role = self.role
-            self.auth_error = "Account created successfully! You can now log in."
+            base.user_name = self.full_name
+            base.user_email = self.email
+            base.user_role = self.role
+
+            self.auth_error = ""
+            self.auth_success = "Account created successfully! You can now log in."
             self.is_signup_mode = False
         except Exception as e:
             self.auth_error = f"Sign up failed: {str(e)}"
 
-    def handle_logout(self):
+    async def handle_logout(self):
+        base = await self.get_state(BaseState)
+
         self.is_logged_in = False
         self.email = ""
         self.password = ""
         self.confirm_password = ""
+        self.full_name = ""
         self.current_user_id = ""
         self.user_id = ""
+        self.user_name = ""
         self.user_email = ""
         self.user_role = "student"
+        self.auth_error = ""
+        self.auth_success = ""
+
+        base.user_id = ""
+        base.user_name = ""
+        base.user_email = ""
+        base.user_role = "student"
+        return rx.redirect("/login")
 
 
 def render_input_field(
@@ -350,7 +402,14 @@ def auth_view() -> rx.Component:
                             cursor="pointer",
                             _hover={"bg": "#A93226"},
                         ),
-                        rx.text(State.auth_error, color="#C03928", size="2", font_weight="500"),
+                        rx.cond(
+                            State.auth_error != "",
+                            rx.text(State.auth_error, color="#C03928", size="2", font_weight="500"),
+                        ),
+                        rx.cond(
+                            State.auth_success != "",
+                            rx.text(State.auth_success, color="#15803D", size="2", font_weight="500"),
+                        ),
                         width="100%",
                         align_items="start",
                         spacing="3",
@@ -389,6 +448,14 @@ def auth_view() -> rx.Component:
 def index() -> rx.Component:
     return rx.cond(
         State.is_logged_in,
-        dashboard_view(),
+        rx.cond(
+            State.user_role == "admin",
+            rx.fragment(),
+            rx.cond(
+                State.user_role == "faculty",
+                rx.fragment(),
+                dashboard_view(),
+            ),
+        ),
         auth_view(),
     )

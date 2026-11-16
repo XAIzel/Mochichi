@@ -48,7 +48,7 @@ def _directory_row(account: dict[str, str]) -> rx.Component:
             rx.hstack(
                 _role_pill(account["role_label"]),
                 rx.text(
-                    "•  " + account["department"],
+                    "• " + account["department"],
                     font_size="11px",
                     color="#6B7280",
                 ),
@@ -68,7 +68,7 @@ def _directory_row(account: dict[str, str]) -> rx.Component:
             color="#374151",
             flex="1",
         ),
-        # ACTIVE toggle switch column (UI shell now; wired to Supabase update in Phase 2)
+        # ACTIVE toggle switch column
         rx.box(
             rx.switch(
                 checked=account["is_active"] == "true",

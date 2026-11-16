@@ -2,16 +2,22 @@ import reflex as rx
 from mochichi_scheduler.state import BaseState
 
 
-def sidebar_item(icon: str, text: str, url: str, active: bool = False) -> rx.Component:
+def sidebar_item(
+    icon: str,
+    text: str,
+    url: str,
+    active: bool | rx.Var[bool] = False,
+    on_click=None,
+) -> rx.Component:
     """Single navigation link styled to match the Mochichi Figma sidebar."""
     return rx.link(
         rx.hstack(
-            rx.icon(icon, size=17, color="#2c2c2c" if not active else "#a33"),
+            rx.icon(icon, size=17, color=rx.cond(active, "#a33", "#2c2c2c")),
             rx.text(
                 text,
-                font_weight="600" if active else "500",
+                font_weight=rx.cond(active, "600", "500"),
                 font_size="13px",
-                color="#1a1a1a" if active else "#374151",
+                color=rx.cond(active, "#1a1a1a", "#374151"),
                 line_height="1.3",
             ),
             spacing="3",
@@ -19,10 +25,11 @@ def sidebar_item(icon: str, text: str, url: str, active: bool = False) -> rx.Com
             align="center",
         ),
         href=url,
+        on_click=on_click,
         width="100%",
         padding="10px 12px",
         border_radius="8px",
-        background_color="#f3ece0" if active else "transparent",
+        background_color=rx.cond(active, "#f3ece0", "transparent"),
         text_decoration="none",
         _hover={"background_color": "#f3ece0", "text_decoration": "none"},
     )
@@ -75,10 +82,15 @@ def _profile_badge() -> rx.Component:
     )
 
 
-def _student_nav(active_page: str) -> rx.Component:
+def _student_nav(active_page: str | rx.Var[str]) -> rx.Component:
     """Student navigation items matching the Student Figma screens."""
     return rx.vstack(
-        sidebar_item("layout-dashboard", "Overview", "/", active=(active_page == "Overview")),
+        sidebar_item(
+            "layout-dashboard",
+            "Overview",
+            "/dashboard",
+            active=(active_page == "Overview"),
+        ),
         sidebar_item("users", "Faculty", "/faculty", active=(active_page == "Faculty")),
         sidebar_item("bot", "Mochichi", "/mochichi", active=(active_page == "Mochichi")),
         sidebar_item(
@@ -92,39 +104,46 @@ def _student_nav(active_page: str) -> rx.Component:
     )
 
 
-def _faculty_nav(active_page: str) -> rx.Component:
+def _faculty_nav(active_page: str | rx.Var[str]) -> rx.Component:
     """Faculty navigation items matching the Faculty Figma screens."""
+    # Local import prevents circular import with faculty_dashboard.py
+    from mochichi_scheduler.pages.faculty_dashboard import FacultyState
+
     return rx.vstack(
         sidebar_item(
             "layout-dashboard",
             "Overview",
             "/faculty-dashboard",
             active=(active_page == "Overview"),
+            on_click=FacultyState.set_tab("Overview"),
         ),
         sidebar_item(
             "clipboard-check",
             "View all Confirmed Appointments",
-            "/faculty-confirmed",
+            "/faculty-dashboard",
             active=(active_page == "View all Confirmed Appointments"),
+            on_click=FacultyState.set_tab("View all Confirmed Appointments"),
         ),
         sidebar_item(
             "user-check",
             "Approval",
-            "/faculty-approval",
+            "/faculty-dashboard",
             active=(active_page == "Approval"),
+            on_click=FacultyState.set_tab("Approval"),
         ),
         sidebar_item(
             "sliders-horizontal",
             "Actions",
-            "/faculty-actions",
+            "/faculty-dashboard",
             active=(active_page == "Actions"),
+            on_click=FacultyState.set_tab("Actions"),
         ),
         spacing="1",
         width="100%",
     )
 
 
-def _admin_nav(active_page: str) -> rx.Component:
+def _admin_nav(active_page: str | rx.Var[str]) -> rx.Component:
     """Admin navigation items matching the Admin Figma screen."""
     return rx.vstack(
         sidebar_item(
@@ -138,22 +157,29 @@ def _admin_nav(active_page: str) -> rx.Component:
     )
 
 
-def sidebar(active_page: str = "Overview") -> rx.Component:
+def sidebar(active_page: str | rx.Var[str] = "Overview") -> rx.Component:
     """Role-aware persistent sidebar for Student, Faculty, and Admin views."""
+    # Local import prevents circular import: log_in_sign_in -> dashboard -> sidebar -> log_in_sign_in
+    from mochichi_scheduler.pages.log_in_sign_in import State
+
     return rx.vstack(
-        # Static Profile Header Card (No PFP upload/settings modal per finalized scope)
+        # Static Profile Header Card
         rx.hstack(
             _profile_badge(),
             rx.vstack(
                 rx.text(
-                    BaseState.user_name,
+                    rx.cond(BaseState.user_name != "", BaseState.user_name, "User"),
                     font_weight="600",
                     font_size="13px",
                     color="#1a1a1a",
                     line_height="1.2",
                 ),
                 rx.text(
-                    BaseState.user_email,
+                    rx.cond(
+                        BaseState.user_email != "",
+                        BaseState.user_email,
+                        "user@lspu.edu.ph",
+                    ),
                     font_size="10px",
                     color="#6b7280",
                     line_height="1.2",
@@ -183,9 +209,26 @@ def sidebar(active_page: str = "Overview") -> rx.Component:
 
         rx.spacer(),
 
-        # Bottom Sign Out Action (Wired to Supabase logout in Phase 2, Micro-Slice 1)
+        # Bottom Sign Out Action (Clears auth state & redirects to /login)
         rx.vstack(
-            sidebar_item("log-out", "Sign out", "/login", active=False),
+            rx.hstack(
+                rx.icon("log-out", size=17, color="#2c2c2c"),
+                rx.text(
+                    "Sign out",
+                    font_weight="500",
+                    font_size="13px",
+                    color="#374151",
+                    line_height="1.3",
+                ),
+                spacing="3",
+                width="100%",
+                align="center",
+                padding="10px 12px",
+                border_radius="8px",
+                cursor="pointer",
+                _hover={"background_color": "#f3ece0"},
+                on_click=State.handle_logout,
+            ),
             spacing="1",
             width="100%",
         ),
