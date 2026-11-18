@@ -37,7 +37,8 @@ def _user_row(
         rx.table.cell(account["email"]),
         rx.table.cell(
             rx.switch(
-                checked=account["is_active"],
+                # THE FIX: Cast the dictionary string value to a strict boolean
+                checked=account["is_active"].to(bool),
                 color_scheme="jade",
                 disabled=is_loading,
                 on_change=(

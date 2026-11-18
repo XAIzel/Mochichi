@@ -12,10 +12,10 @@ class State(BaseState):
     confirm_password: str = ""
     full_name: str = ""
     role: str = "student"  # 'student' | 'faculty' | 'admin'
+    
     auth_error: str = ""
     auth_success: str = ""
     is_logged_in: bool = False
-    current_user_id: str = ""
     is_signup_mode: bool = False
 
     def set_email(self, email: str):
@@ -63,48 +63,39 @@ class State(BaseState):
             )
 
             if response.user:
-                base = await self.get_state(BaseState)
-
                 self.is_logged_in = True
-                self.current_user_id = response.user.id
                 self.user_id = response.user.id
                 self.user_email = self.email
-                base.user_id = response.user.id
-                base.user_email = self.email
 
                 # 2. Fetch identity from Supabase 'users' table
                 user_record = (
                     supabase.table("users")
-                    .select("role, full_name")
+                    .select("role, full_name, department")
                     .eq("user_id", response.user.id)
                     .execute()
                 )
 
                 if user_record.data:
-                    resolved_role = user_record.data[0].get("role", "student")
-                    resolved_name = user_record.data[0].get("full_name", self.email)
+                    self.user_role = user_record.data[0].get("role", "student")
+                    self.user_name = user_record.data[0].get("full_name", self.email)
+                    self.user_department = user_record.data[0].get("department", "Not Assigned")
                 else:
-                    # Fallback to metadata if the database table row isn't created yet
-                    meta = response.user.user_metadata or {}
-                    resolved_role = meta.get("role", "student")
-                    resolved_name = meta.get("full_name", "Unknown User")
+                    self.user_role = "student"
+                    self.user_name = "Unknown User"
 
-                self.user_role = resolved_role
-                self.user_name = resolved_name
-                base.user_role = resolved_role
-                base.user_name = resolved_name
                 self.auth_error = ""
 
                 # 3. Role-Based Routing
-                if resolved_role == "admin":
+                if self.user_role == "admin":
                     return rx.redirect("/admin-dashboard")
-                elif resolved_role == "faculty":
+                elif self.user_role == "faculty":
                     return rx.redirect("/faculty-dashboard")
                 else:
                     return rx.redirect("/dashboard")
 
         except Exception as e:
-            self.auth_error = f"Login failed: {str(e)}"
+            self.auth_error = "Invalid email or password."
+            print(f"Login Error: {e}")
 
     async def handle_signup(self):
         self.auth_success = ""
@@ -117,58 +108,66 @@ class State(BaseState):
         if self.password != self.confirm_password:
             self.auth_error = "Passwords do not match."
             return
+        if len(self.password) < 8:
+            self.auth_error = "Password must be at least 8 characters."
+            return
         if supabase is None:
             self.auth_error = "Supabase client is not configured yet. Check your .env file."
             return
 
         try:
-            supabase.auth.sign_up(
+            # 1. Create the account in Supabase Auth
+            response = supabase.auth.sign_up(
                 {
                     "email": self.email,
                     "password": self.password,
-                    "options": {
-                        "data": {
-                            "full_name": self.full_name,
-                            "role": self.role,
-                        }
-                    },
                 }
             )
-            base = await self.get_state(BaseState)
+            
+            if response.user:
+                # 2. Insert the new user into the public.users directory table
+                try:
+                    supabase.table("users").insert({
+                        "user_id": response.user.id,
+                        "email": self.email,
+                        "full_name": self.full_name,
+                        "role": self.role,
+                        "department": "Pending Assignment",
+                        "is_active": True
+                    }).execute()
+                except Exception as insert_e:
+                    print(f"Directory Insert Notice (Safe to ignore if trigger exists): {insert_e}")
 
-            self.user_name = self.full_name
-            self.user_email = self.email
-            self.user_role = self.role
-            base.user_name = self.full_name
-            base.user_email = self.email
-            base.user_role = self.role
-
-            self.auth_error = ""
-            self.auth_success = "Account created successfully! You can now log in."
-            self.is_signup_mode = False
+                self.auth_error = ""
+                self.auth_success = "Account created successfully! You can now log in."
+                self.is_signup_mode = False
+                
         except Exception as e:
-            self.auth_error = f"Sign up failed: {str(e)}"
+            self.auth_error = f"Sign up failed. User may already exist."
+            print(f"Signup Error: {e}")
 
     async def handle_logout(self):
-        base = await self.get_state(BaseState)
-
         self.is_logged_in = False
         self.email = ""
         self.password = ""
         self.confirm_password = ""
         self.full_name = ""
-        self.current_user_id = ""
+        
         self.user_id = ""
         self.user_name = ""
         self.user_email = ""
         self.user_role = "student"
+        
         self.auth_error = ""
         self.auth_success = ""
-
-        base.user_id = ""
-        base.user_name = ""
-        base.user_email = ""
-        base.user_role = "student"
+        
+        # Sign out from Supabase session
+        if supabase:
+            try:
+                supabase.auth.sign_out()
+            except:
+                pass
+                
         return rx.redirect("/login")
 
 
@@ -215,7 +214,6 @@ def render_input_field(
 @rx.page(route="/login")
 def auth_view() -> rx.Component:
     return rx.center(
-        # Main Unified Card
         rx.flex(
             # ================= LEFT PANEL (Static) =================
             rx.vstack(
@@ -424,8 +422,6 @@ def auth_view() -> rx.Component:
                 justify="center",
                 display="flex",
             ),
-
-            # Card Wrapper Configuration
             direction="row",
             align="stretch",
             width="980px",
@@ -437,25 +433,8 @@ def auth_view() -> rx.Component:
             border="1px solid #E5E7EB",
             overflow="hidden",
         ),
-        # Outer Background Viewport
         width="100vw",
         min_height="100vh",
         bg="#FAF6EE",
         padding="2rem",
-    )
-
-
-def index() -> rx.Component:
-    return rx.cond(
-        State.is_logged_in,
-        rx.cond(
-            State.user_role == "admin",
-            rx.fragment(),
-            rx.cond(
-                State.user_role == "faculty",
-                rx.fragment(),
-                dashboard_view(),
-            ),
-        ),
-        auth_view(),
     )
